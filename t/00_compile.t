@@ -6,7 +6,6 @@ use_ok $_ for qw(
     App::gropdf::Type1
     App::gropdf::OpenType
     App::gropdf::plus
-    App::gropdf
 );
 
 done_testing;

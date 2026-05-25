@@ -64,7 +64,21 @@
       }
    },
    "release_status" : "unstable",
+   "resources" : {
+      "bugtracker" : {
+         "web" : "https://github.com/obuk/App-gropdf-plus/issues"
+      },
+      "homepage" : "https://github.com/obuk/App-gropdf-plus",
+      "repository" : {
+         "type" : "git",
+         "url" : "https://github.com/obuk/App-gropdf-plus.git",
+         "web" : "https://github.com/obuk/App-gropdf-plus"
+      }
+   },
    "version" : "2026.05.24",
+   "x_contributors" : [
+      "KUBO, Koichi <k@obuk.org>"
+   ],
    "x_serialization_backend" : "JSON::PP version 4.06",
    "x_static_install" : 1
 }

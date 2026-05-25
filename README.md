@@ -1,4 +1,4 @@
-
+[![Actions Status](https://github.com/obuk/App-gropdf-plus/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/obuk/App-gropdf-plus/actions?workflow=test)
 # NAME
 
 App::gropdf::plus - gropdf + OpenType/CFF
