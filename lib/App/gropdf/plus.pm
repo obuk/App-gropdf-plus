@@ -3201,8 +3201,8 @@ sub LoadFont {
 
         #$fnt{fontfile} = $download{$fontkey};
 
-	for (keys %{$download{$fontkey}}) {
-	    $fnt{fontfile} = $download{$fontkey}{$_};
+	for (qw(fontfile dir embed module)) {
+	    $fnt{$_} = $download{$fontkey}{$_};
 	}
 
 	my $pm;
