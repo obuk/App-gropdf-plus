@@ -1,0 +1,25 @@
+#!/usr/bin/env perl
+
+=encoding utf-8
+
+=head1 NAME
+
+gropdf-plus - groff pdf driver
+
+=head1 SYNOPSYS
+
+install this program gropdf-otf as follows:
+
+ install gropdf-otf your/bin
+
+and add prepro line to your your/font/devpdf/DESC.
+
+ cd your/font/devpdf
+ sed -e '/^postpro/s/^/#' -e '$a\
+ postpro gropdf-otf DESC >/tmp/DESC
+ install -b /tmp/DESC DESC
+
+=cut
+
+use App::gropdf::plus;
+exit(App::gropdf::plus->run);
