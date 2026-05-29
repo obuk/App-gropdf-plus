@@ -44,15 +44,20 @@ sub init {
 	}
     }
 
-    # reuse the font objects remaining in %fontlst to reduce font
-    # loading time.
+    $self->{optimize} = 0;
+    $self->{optimize} |= 1;	# reuse font object
+    $self->{optimize} |= 2;	# share subset font
 
     my $otf;
-    for (grep defined $_->{FNT}->{' OTF'}, values %fontlst) {
-	$otf = $_->{FNT}->{' OTF'}, last
-	    if $_->{FNT}->{fontfile} eq $self->{fontfile};
-    }
 
+    if ($self->{optimize} & 1) {
+	# reuses font objects remaining in %fontlst to reduce font
+	# loading time.
+	for (grep defined $_->{FNT}->{' OTF'}, values %fontlst) {
+	    $otf = $_->{FNT}->{' OTF'}, last
+		if $_->{FNT}->{fontfile} eq $self->{fontfile};
+	}
+    }
     $otf //= Font::TTF::Font->open($self->{fontfile});
     $self->{' OTF'} = $otf;
 
@@ -133,14 +138,10 @@ sub init {
     $self->{' DW'}  = 1000;
     $self->{' DW2'} = [1000 + $self->{' Descender'}, -1000];
 
-    # Set nospace to 1 in cidfont.  Because cidfont requires character
-    # CID numbers to be expressed in hexadecimal. (e.g. [ <XXXX> ] TJ)
-    # So the USESPACE option will not have the desired effect.
+    # sets nospace to 1. However, this does not mean that space glyph do
+    # not exist in cidfont. This is to disable the USESPACE option in
+    # cidfont.
     $self->{nospace} = 1;
-
-    # and turn off the option USESPACE to suppress the message "using
-    # nospace mode for ..."
-    #$options &= ~USESPACE;
 
     $self;
 }
@@ -206,13 +207,72 @@ sub build_fontobject {
     # the download file without the asterisk at the beginning.
     $self->{' embed'} = 1 if ($options & EMBGSUB) && $self->{opentype}{gsub};
 
-    if (($self->{' embed'} || $embedall) && @{$self->SUB}) {
+    if (($self->{' embed'} || $embedall) && !($options & NOFILE)) {
 	$self->embed_fontfile;
     }
 }
 
 sub embed_fontfile {
     my ($self) = @_;
+
+    my @fontno;
+    my $f;
+
+    if ($self->{optimize} & 2) {
+
+	# creates subset font containing all CIDs of @fontno. (creates
+	# subset font that can be shared by all fonts that has same
+	# internalname.) Then, all fonts of @fontno use the subset font.
+
+	for my $fontno (keys %fontlst) {
+	    my $fnt = $fontlst{$fontno}{FNT};
+	    next unless $fnt->{internalname} eq $self->{internalname};
+	    push @fontno, $fontno;
+	}
+	for my $fontno (@fontno) {
+	    my $fnt = $fontlst{$fontno}{FNT};
+	    next unless my $font_dictionary = $fnt->{OBJ};
+	    next unless my $p = GetObj($font_dictionary);
+	    next unless $p->{DescendantFonts};
+	    next unless my $cid_font = $p->{DescendantFonts}->[0];
+	    next unless my $q = GetObj($cid_font);
+	    next unless my $font_descriptor = $q->{FontDescriptor};
+	    next unless my $r = GetObj($font_descriptor);
+	    next unless $r->{FontName};
+	    next unless length($r->{FontName}) > length($self->{internalname});
+	    my $plus_name = substr $r->{FontName}, -length($self->{internalname}) - 1;
+	    next unless $plus_name eq "+$self->{internalname}";
+	    $f = {
+		FONTFILE => $r->{FontFile3},
+		FONTNAME => $r->{FontName},
+	    };
+	    last;
+	}
+    } else {
+	@fontno = $self->fontno;
+    }
+
+    unless ($f) {
+	my %seen;
+	my @cid = grep !$seen{$_}++, map $_->[PSNAME],
+	    map @{$fontlst{$_}{FNT}{SUB}}, @fontno;
+	if (@cid == 0) {
+	    ;
+	} elsif (my $font_stream = $self->subset(\@cid)) {
+	    my $fontfile = BuildObj(++$objct, {
+		"Subtype" => "/CIDFontType0C",
+	    });
+	    $obj[$objct]->{STREAM} = $font_stream;
+	    $obj[$objct]->{DATA}{Length} = length $font_stream;
+	    $f = {
+		FONTFILE => $fontfile,
+		FONTNAME => "/".SubTag().$self->{internalname},
+	    };
+	} else {
+	    Die("can't subset $self->{internalname} ($self->{name})");
+	}
+    }
+    return unless $f;
 
     my $font_dictionary = $self->{OBJ};
     my $cid_font;
@@ -225,30 +285,18 @@ sub embed_fontfile {
     }
 
     # Table 127 – Additional entries in an embedded font stream dictionary
-    my @cid = map $_->[PSNAME], @{$self->SUB};
-    if (my $font_stream = $self->subset(\@cid)) {
-	my $fontfile = BuildObj(++$objct, {
-	    "Subtype" => "/CIDFontType0C",
-	});
-	$obj[$objct]->{STREAM} = $font_stream;
-	$obj[$objct]->{DATA}{Length} = length $font_stream;
-
-	$self->{FONTFILE} = $fontfile;
-	$self->{FONTNAME} = "/".SubTag().$self->{internalname};
+    if ($font_descriptor) {
 	if (my $p = GetObj($font_descriptor)) {
-	    $p->{FontFile3} = $self->{FONTFILE} if !($options & NOFILE);
-	    $p->{FontName} = $self->{FONTNAME};
+	    $p->{FontFile3} = $f->{FONTFILE};
+	    $p->{FontName} = $f->{FONTNAME};
 	}
 	if (my $p = GetObj($font_dictionary)) {
-	    $p->{BaseFont} = $self->{FONTNAME};
+	    $p->{BaseFont} = $f->{FONTNAME};
 	}
 	if (my $p = GetObj($cid_font)) {
-	    $p->{BaseFont} = $self->{FONTNAME};
+	    $p->{BaseFont} = $f->{FONTNAME};
 	}
-    } else {
-	Die("can't subset $self->{internalname} ($self->{name})");
     }
-
 }
 
 
