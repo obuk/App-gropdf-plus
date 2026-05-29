@@ -1,6 +1,6 @@
 package App::gropdf::plus;
 
-our $VERSION = "2026.05.24";
+our $VERSION = "2026.05.29";
 
 #!@PERL@
 #
@@ -919,9 +919,12 @@ sub LoadDownload
 		#$download{"$foundry $name"} = [$file,$dir];
 		$download{"$foundry $name"} = {
 		    fontfile => $file,
-		    dir => $dir,
-		    embed => !$star,
-		    module => $module,
+		    # Add a space to the beginning of the name to avoid
+		    # conflicts with the directives in section 1 of the
+		    # groff fonts.
+		    ' dir' => $dir,
+		    ' embed' => !$star,
+		    ' module' => $module,
 		};
 	    }
 	}
@@ -3197,18 +3200,18 @@ sub LoadFont {
     my $fontkey="$foundry $fnt{internalname}";
 
     my $fnt_obj;
-    if (exists($download{$fontkey})) {
+    if (my $d = $download{$fontkey})
+    {
 
         #$fnt{fontfile} = $download{$fontkey};
-
-	for (qw(fontfile dir embed module)) {
-	    $fnt{$_} = $download{$fontkey}{$_};
+	for ('fontfile', ' embed') {
+	    $fnt{$_} = $d->{$_};
 	}
 
 	my $pm;
 	my $default_module = 'Type1';
 	for my $base (__PACKAGE__, (__PACKAGE__ =~/(.*?)::\w+$/)[0], '') {
-	    my $path_pm = $pm = join '::', $base, $fnt{module} // $default_module;
+	    my $path_pm = $pm = join '::', $base, $d->{' module'} // $default_module;
 	    $path_pm =~ s/::/\//g;
 	    $path_pm .= ".pm";
 	    if ($INC{$path_pm}) {
@@ -3221,19 +3224,19 @@ sub LoadFont {
 	}
 	if ($pm) {
 	    $fnt_obj = $pm->new(fontno => $fontno, %fnt);
-	} else {
-	    Die("can't use $fnt{module}\n");
 	}
     }
-    else {
-        if (exists($missing{$fontkey})) {
+    #else
+    if (!$fnt_obj)
+    {
+	if (defined($missing{$fontkey})) {
             Warn("The download file in '$missing{$fontkey}' ",
 		 "has erroneous entry for '$fnt{internalname} ($ofontnm)'");
         }
         else {
             Warn("unable to embed font file for '$fnt{internalname}' ",
 		 "($ofontnm) (missing entry in 'download' file?)")
-		if $embedall;
+		; # if $embedall;
         }
     }
 
@@ -4190,6 +4193,7 @@ sub PutGlyph
 {
     my ($fnt,$ch,$nowidth)=@_;
     my $chf;
+    Die "font #$cft is not loaded\n" unless $fnt;
     ($chf,$ch)=$fnt->GetNAM($ch);
 
     IsText();

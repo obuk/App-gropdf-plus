@@ -200,9 +200,13 @@ sub build_fontobject {
 	}
     }
 
-    $self->{embed} = 1 if ($options & EMBGSUB) && $self->{opentype}{gsub};
+    # $self->{' embed'} is a flag that requests font embedding.  this
+    # flag is passed via %fnt in LoadFont. This can be confusing because
+    # %fnt is a section directive in groff fonts, and also the path to
+    # the download file without the asterisk at the beginning.
+    $self->{' embed'} = 1 if ($options & EMBGSUB) && $self->{opentype}{gsub};
 
-    if (($self->{embed} || $embedall) && @{$self->SUB}) {
+    if (($self->{' embed'} || $embedall) && @{$self->SUB}) {
 	$self->embed_fontfile;
     }
 }
@@ -424,7 +428,7 @@ sub SUB {
 
     my $sub;
     if (($options & CMAPFULL) == 0) {
-	if ($self->{embed} || $embedall) {
+	if ($self->{' embed'} || $embedall) {
 	    $sub = $self->{SUB};
 	} else {
 	    my $name = join '-',
