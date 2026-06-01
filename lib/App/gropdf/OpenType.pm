@@ -8,6 +8,7 @@ use Carp;
 use Encode;
 use List::Util qw(min);
 use File::Temp  qw/tempfile/;
+use Unicode::Normalize;
 use Unicode::UCD qw/charblocks/;
 use Font::TTF::Font;
 
@@ -504,22 +505,23 @@ sub GetNAM {
 
     unless ($r->[UNICODE]) {
 
-        # replace the decomposed characters with the equivalent
-        # precomposed characters.
-
         if (length $c == 1) {
             $r->[UNICODE] = sprintf "%04X", ord($c);
         }
+
+	# converts decomposed char codes to composed char codes, and
+	# verify they are defined in the font.  uses composed character
+	# codes if verified.
         elsif (my ($hex) = $c =~ /^u([\dA-F_]{4,})$/) {
             my $u8 = pack "U*", map hex($_), split '_', $hex;
             if ($u8 !~ /\p{InCJK_Compatibility_Ideographs}/) {
                 if (__PACKAGE__->can('NFC')) {
-                    $u8 = NFC($u8);
+		    my $hex_2 = join '_', map { sprintf "%04X", $_ } unpack "n*",
+			encode "UTF16-BE", NFC($u8);
+		    $hex = $hex_2 if $f->{NAM}->{'u'.$hex_2} == $r;
                 }
             }
-            my $u16 = join '_', map { sprintf "%04X", $_ } unpack "n*",
-              encode "UTF16-BE", $u8;
-            $r->[UNICODE] = $u16;
+            $r->[UNICODE] = $hex;
         }
 
         $r->[WIDTH]   //= 1000;

@@ -15,6 +15,7 @@ requires 'File::Temp';
 requires 'List::Util';
 requires 'Font::TTF::Font';
 #requires 'Perl::Tidy';
+requires 'Unicode::Normalize';
 requires 'Unicode::UCD';
 
 on 'test' => sub {

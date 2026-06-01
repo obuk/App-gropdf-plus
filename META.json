@@ -53,6 +53,7 @@
             "Getopt::Long" : "0",
             "List::Util" : "0",
             "POSIX" : "0",
+            "Unicode::Normalize" : "0",
             "Unicode::UCD" : "0",
             "perl" : "v5.8.0"
          }
@@ -75,7 +76,7 @@
          "web" : "https://github.com/obuk/App-gropdf-plus"
       }
    },
-   "version" : "2026.05.24",
+   "version" : "2026.05.29",
    "x_contributors" : [
       "KUBO, Koichi <k@obuk.org>"
    ],
