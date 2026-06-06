@@ -277,7 +277,8 @@ my $thisfnt;
 my $parcln=qr/\[[^\]]*?\]|(.)((?!\1).)*\1/;
 my $parclntyp=qr/(?:[\d\w]|\([+-]?[\S]{2}|$parcln)/;
 
-my $reduce_TJ = 1;		# xxxxx
+my $reduce_TJ = 1;
+my $reduce_d3 = 1; # reduces the decimal point and the zeros after the decimal point.
 
 sub run {
     my $class = shift;
@@ -4093,7 +4094,10 @@ sub push_TJ {
 
 sub d3
 {
-    return(sprintf("%.3f",shift || 0));
+    my $d3 = sprintf("%.3f", shift || 0);
+    return $d3 if !$reduce_d3;
+    $d3 =~ s/(\.0{3}|0{1,2})$//;
+    return $d3;
 }
 
 sub LoadAhead
