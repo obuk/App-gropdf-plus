@@ -221,6 +221,14 @@ sub init {
 
     confess "set fontno" unless defined $self->fontno;
 
+    $self->{nospace} = !$self->has_space;
+    if (!$self->{nospace}) {
+	$self->{NAM}->{space}->[MINOR] = 32;
+	$self->{NAM}->{space}->[MAJOR] = 0;
+	$self->{NAM}->{space}->[UNICODE] = '0020';
+	$self->{spacewidth} = 270 if !exists($self->{spacewidth});
+    }
+
     $self->{' Encoding'} = $self->{encoding} // 'CustomEnc';
     $self->{' CMapName'} = join '-', 'Adobe', 'Identity', 'UCS';
     #$self->{' CMapName'} = join '-', $self->{name}, 'Identity', 'UCS';
@@ -459,12 +467,52 @@ sub build_fontobject {
 }
 
 
+# the font has the space glyph.
+sub has_space {
+    my ($self) = @_;
+    return defined $self->{NAM}->{space}->[PSNAME] &&
+	$self->{NAM}->{space}->[PSNAME] eq '/space' &&
+	exists $self->{spacewidth} && $self->{spacewidth} > 0;
+}
+
+
+# space using whitespace
+sub psspace {
+    my ($self, $n) = @_;
+    $n //= 1;
+    if ($n > 0) {
+	return "(" . ' ' x $n . ")";
+    } else {
+	return ();
+    }
+}
+
+# to text strings
+sub pschar {
+    my ($self, $c) = @_;
+
+    return undef unless defined(my $chr = $c->[CHR]);
+
+    my $char=chr(abs($chr));
+    $char="\\\\" if $char eq "\\";
+    $char="\\(" if $char eq "(";
+    $char="\\)" if $char eq ")";
+    $char="($char)";
+    return ($char);
+}
+
+# text position
+sub placement {
+    #my ($self, $c) = @_;
+    return undef;
+}
+
+
 sub GetNAM {
     my ($self, $c) = (@_);
-    my $f = $self;		# xxxxx
-    my $r = $f->{NAM}->{$c};
+    my $r = $self->{NAM}->{$c};
     return ($r, $c) if ref($r) eq 'ARRAY';
-    return ($f->{NAM}->{$r}, $r);
+    return ($self->{NAM}->{$r}, $r);
 }
 
 

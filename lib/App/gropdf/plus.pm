@@ -1,6 +1,6 @@
 package App::gropdf::plus;
 
-our $VERSION = "2026.05.29";
+our $VERSION = "2026.06.06";
 
 #!@PERL@
 #
@@ -3181,9 +3181,6 @@ sub LoadFont {
 
     close($f);
 
-    $fnt{NAM}->{space}->[MINOR]=32;
-    $fnt{NAM}->{space}->[MAJOR]=0;
-    $fnt{NAM}->{space}->[UNICODE]='u0020'; # xxxxx
     my $fno=0;
     my $slant=0;
     $fnt{DIFF}=[];
@@ -3193,9 +3190,6 @@ sub LoadFont {
     $fnt{NAM}->{''}=[0,-1,'/.notdef',-1,0,0,0];
     $slant=-$fnt{'slant'} if exists($fnt{'slant'});
     $fnt{slant}=$slant;
-
-    $fnt{nospace}=(!defined($fnt{NAM}->{space}->[PSNAME]) or $fnt{NAM}->{space}->[PSNAME] ne '/space' or !exists($fnt{'spacewidth'}))?1:0;
-    $fnt{'spacewidth'}=270 if !exists($fnt{'spacewidth'});
 
     my $fontkey="$foundry $fnt{internalname}";
 
@@ -3953,7 +3947,6 @@ sub PutLine
     my $len=0;
     my $rev=0;
 
-#    if (($lin[0]->[CHR]||0) < 0)
     if ($xrev)
     {
 	$len=($lin[$#lin]->[XPOS]-$lin[0]->[XPOS]+$lin[$#lin]->[HWID])*1000/$cftsz;
@@ -3971,11 +3964,21 @@ sub PutLine
 
     foreach my $c (@lin)
     {
-	my ($char, $placement) = font_char_and_placement($c);
+	my $char = $thisfnt->pschar($c);
+	my $chrc = '';
 
-	my $chrc = defined($char)
-	    ? $c->[CHF]->[MAJOR].'/'.$c->[CHR] . $char . "[$c->[CHF]->[PSNAME]]"
-	    : 'undef';
+	# defined($chr) and defined($c->[CHF]) are equivalent.
+	# abs($chr) and $c->[CHF]->[MINOR] are also equivalent.
+	# $chf->[PSNAME] and $fnt->pschar($c) are almost equivalent.
+	if (my $chf = $c->[CHF]) {
+	    $chrc .= $chf->[MAJOR].'/'.$chf->[MINOR];
+	    #$chrc .= "(".chr($chf->[MINOR]).")" if $cftmajor == 0 and $chf->[MINOR] < 128;
+	    #$chrc .= "[$chf->[PSNAME]]";
+	    $chrc .= $char;
+	} else {
+	    $chrc = 'undef';
+	}
+
 	$stream.="%! PutLine: XPOS=$c->[XPOS], CHR=$chrc, CWID=$c->[CWID], HWID=$c->[HWID], NOMV=$c->[NOMV]\n" if $debug;
 
 	if (!defined($char) and defined($wt))
@@ -3996,15 +3999,7 @@ sub PutLine
 
 		    if ($i < 6)
 		    {
-			if ($thisfnt->{cidfont}) {
-			    if ($i > 0) {
-				$thisfnt->{usespace}++;
-				my ($chf, $ch) = GetNAM($thisfnt, 'space');
-				push_TJ(\@TJ, "<" . sprintf("%04X", $chf->[PSNAME]) x $i . ">");
-			    }
-			} else {
-			    push_TJ(\@TJ, "(" . ' ' x $i . ")");
-			}
+			push_TJ(\@TJ, $thisfnt->psspace($i));
 			$gap-=($whtsz+$wt) * $i;
 		    }
 		}
@@ -4032,6 +4027,7 @@ sub PutLine
 
 	    if (defined($char))
 	    {
+		my $placement = $thisfnt->placement($c);
 		if (defined $placement) {
 		    push_TJ(\@TJ, -$placement, $char, $placement);
 		} else {
@@ -4049,6 +4045,7 @@ sub PutLine
 	}
 	else
 	{
+	    my $placement = $thisfnt->placement($c);
 	    if (defined $placement) {
 		push_TJ(\@TJ, -$placement, $char, $placement);
 	    } else {
@@ -4064,52 +4061,6 @@ sub PutLine
     @lin=();
     $wt=undef;
     $whtsz=$fontlst{$cft}->{FNT}->{spacewidth}*$cftsz;
-}
-
-
-sub font_char_and_placement {
-    my ($c) = @_;
-
-    my $chr = $c->[CHR];
-    return () unless defined($chr);
-    my $psname = $c->[CHF]->[PSNAME];
-    if ($thisfnt->{cidfont}) {
-	my ($char, $placement);
-	my $gid = $thisfnt->{' CID2GID'}->[$psname];
-	if (my $gpos = $thisfnt->{' GPOS'}) {
-	    if ($thisfnt->{vertical}) {
-		if (my $v = $gpos->{$gid}) {
-		    for ($v->{YPlacement}) {
-			$placement += $_ if defined;
-		    }
-		}
-	    } else {
-		if (my $v = $gpos->{$gid}) {
-		    for ($v->{XPlacement}) {
-			$placement += $_ if defined;
-		    }
-		}
-	    }
-	}
-	if ($thisfnt->{' Encoding'} =~ /^Identity-/) {
-	    $char = sprintf "<%04X>", $psname;
-	} else {
-	    my @hex = split '_', $c->[CHF]->[UNICODE];
-	    $char = "<@hex>";
-	}
-	return ($char, $placement);
-    }
-    else {
-	# Type 1
-	$chr=abs($chr);
-	my $char=chr($chr);
-	$char="\\\\" if $char eq "\\";
-	$char="\\(" if $char eq "(";
-	$char="\\)" if $char eq ")";
-	$char="($char)";
-	return ($char);
-    }
-    return ();
 }
 
 

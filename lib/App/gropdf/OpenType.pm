@@ -91,7 +91,7 @@ sub init {
     }
 
     # table 119
-    $self->{' CIDSystemInfo'} = {
+    $self->{' CIDSystemInfo'} //= {
         Registry   => "(Adobe)",
         Ordering   => "(UCS)",
         Supplement => 0,
@@ -142,7 +142,16 @@ sub init {
     # sets nospace to 1. However, this does not mean that space glyph do
     # not exist in cidfont. This is to disable the USESPACE option in
     # cidfont.
-    $self->{nospace} = 1;
+
+    $self->{ALLOC} = 0;
+    $self->{nospace} = !$self->has_space;
+    if (!$self->{nospace}) {
+	my ($chf, $ch) = $self->GetNAM('space');
+	if ($chf) {
+	    $self->AssignGlyph($chf, $ch);
+	    $self->{spacewidth} = 270 if !exists $self->{spacewidth};
+	}
+    }
 
     $self;
 }
@@ -173,10 +182,6 @@ sub glyphs {
 
 sub build_fontobject {
     my ($self) = @_;
-
-    if ($self->{usespace}) {
-	$self->AssignGlyph($self->GetNAM('space'));
-    }
 
     # Type 0 Font dictionary (Table 121)
     my $font_dictionary = $self->type0_font_dictionary;
@@ -497,6 +502,72 @@ sub SUB {
     $self->{SUB} = $sub;
 }
 
+
+# the font has the space glyph. (It's usually cid #1.)
+sub has_space {
+    my ($self) = @_;
+    return defined $self->{NAM}->{space}->[PSNAME] &&
+	$self->{NAM}->{space}->[PSNAME] == 1 &&
+	exists $self->{spacewidth} && $self->{spacewidth} > 0;
+}
+
+
+# space using whitespace (for testing the USESPACE option)
+sub psspace {
+    my ($self, $n) = @_;
+    $n //= 1;
+    if ($n > 0) {
+	confess "cidfont is required" unless defined $self->cidfont;
+	my ($chf, $ch) = $self->GetNAM('space');
+	return "<" . sprintf("%04X", $chf->[PSNAME]) x $n . ">";
+    } else {
+	return ();
+    }
+}
+
+
+# text strings in the TJ array
+sub pschar {
+    my ($self, $c) = @_;
+
+    confess "cidfont is required" unless defined $self->cidfont;
+
+    return undef unless defined($c->[CHR]);
+    return sprintf "<%04X>", $c->[CHF]->[PSNAME];
+}
+
+
+# text position
+sub placement {
+    my ($self, $c) = @_;
+
+    confess "cidfont is required" unless defined $self->cidfont;
+
+    return undef unless defined($c->[CHR]);
+
+    if (my $gpos = $self->{' GPOS'}) {
+	my $placement;
+	my $gid = $self->{' CID2GID'}->[$c->[CHF]->[PSNAME]];
+	if ($self->{vertical}) {
+	    if (my $v = $gpos->{$gid}) {
+		for ($v->{YPlacement}) {
+		    $placement += $_ if defined;
+		}
+	    }
+	} else {
+	    if (my $v = $gpos->{$gid}) {
+		for ($v->{XPlacement}) {
+		    $placement += $_ if defined;
+		}
+	    }
+	}
+	return $placement;
+    }
+
+    return undef;
+}
+
+
 sub GetNAM {
     #my ($f, $c) = (@_);
     my ($self, $c) = (@_);
@@ -544,7 +615,9 @@ sub GetNAM {
 sub AssignGlyph {
     my ($self, $chf, $ch) = (@_);
 
-    ($chf->[MINOR], $chf->[MAJOR]) = ($self->{ALLOC}++ // 0, 0);
+    return if $chf && defined $chf->[MINOR];
+
+    ($chf->[MINOR], $chf->[MAJOR]) = ($self->{ALLOC}++, 0);
     push @{$self->{SUB}}, $chf;
 
     push(@{$self->{CHARSET}->[$chf->[MAJOR]]}, $chf->[PSNAME]);
