@@ -1,6 +1,6 @@
 package App::gropdf::plus;
 
-our $VERSION = "2026.06.06";
+our $VERSION = "2026.06.10";
 
 #!@PERL@
 #
@@ -215,8 +215,9 @@ begincmap
 1 begincodespacerange
 <0000> <FFFF>
 endcodespacerange
-1 beginbfrange
+2 beginbfrange
 <1f> <1f> <002d>
+<FB00> <FB04> [ <00660066> <00660069> <0066006C> <006600660069> <00660066006C> ]
 endbfrange
 endcmap
 CMapName currentdict /CMap defineresource pop
@@ -3219,6 +3220,9 @@ sub LoadFont {
 	}
 	if ($pm) {
 	    $fnt_obj = $pm->new(fontno => $fontno, %fnt);
+	    if ($fnt_obj->can('ucmap')) {
+		$fnt_obj->ucmap($ucmap);
+	    }
 	}
     }
     #else
@@ -4166,13 +4170,13 @@ sub PutGlyph
 	$fnt->AssignGlyph($chf,$ch);
     }
 
-    if ($fontchg or $chf->[MAJOR] != $cftmajor && !$fnt->{cidfont})
+    if ($fontchg or $chf->[MAJOR] != $cftmajor)
     {
 	PutLine();
 	$cftmajor=$chf->[MAJOR];
 #	$whtsz=$fontlst{$cft}->{FNT}->{spacewidth}*$cftsz;
 	my $c=$cft;
-	$c.=".".$cftmajor if $cftmajor && !$fnt->{cidfont};
+	$c.=".".$cftmajor if $cftmajor;
 	$stream.="/F$c $cftsz Tf\n";
 	$fontchg=0;
     }

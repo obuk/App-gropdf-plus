@@ -143,7 +143,6 @@ sub init {
     # not exist in cidfont. This is to disable the USESPACE option in
     # cidfont.
 
-    $self->{ALLOC} = 0;
     $self->{nospace} = !$self->has_space;
     if (!$self->{nospace}) {
 	my ($chf, $ch) = $self->GetNAM('space');
@@ -165,34 +164,33 @@ sub get_name {
     $otf->{name}{strings}[$number][$platform_id][$encoding_id]{$language_id};
 }
 
-sub glyphs {
-    my $self = shift;
-
-    my $glyphs  = '/.notdef';
-    $glyphs .= '/space'	if defined($self->{NO}->[32]) and $self->{NO}->[32] eq 'space';
-
-    my $chars = $self->{TRFCHAR};
-    for (my $j = 0; $j <= $#{$chars}; $j++) {
-	$glyphs .= join('', @{$self->{CHARSET}->[$j]});
-    }
-
-    $glyphs;
-}
-
 
 sub build_fontobject {
     my ($self) = @_;
 
+    $self->_build_fontobject(0);
+    $self->_build_fontobject(1);
+}
+
+sub _build_fontobject {
+    my ($self, $j) = @_;
+
+    return unless defined $j;
+    return unless ref $self->{SUBSET} && $j >= 0 && $j <= $#{$self->{SUBSET}};
+    return unless ref (my $cj = $self->{SUBSET}->[$j]);
+    return unless @$cj > 0;
+
     # Type 0 Font dictionary (Table 121)
     my $font_dictionary = $self->type0_font_dictionary;
-    my $fontnm = $self->fontno;
+
+    my $fontnm = $self->fontno . (($j) ? ".$j" : '');
     $pages->{'Resources'}->{'Font'}->{'F'.$fontnm} = $self->{OBJ} = $font_dictionary;
 
     # Font descriptor (Table 122)
     my $font_descriptor = $self->font_descriptor;
 
     # CIDFont dictionary (Table 117)
-    my $cid_font = $self->cid_font_dictionary;
+    my $cid_font = $self->cid_font_dictionary($cj);
     if (my $p = GetObj($cid_font)) {
 	$p->{FontDescriptor} = $font_descriptor;
     }
@@ -201,25 +199,17 @@ sub build_fontobject {
     }
 
     # ToUnicode CMaps (9.10.3)
-    if (my $tounicode = $self->tounicode_cmap) {
+    if (my $tounicode = $self->tounicode_cmap($cj)) {
 	if (my $p = GetObj($font_dictionary)) {
 	    $p->{ToUnicode} = $tounicode;
 	}
     }
 
-    # $self->{' embed'} is a flag that requests font embedding.  this
-    # flag is passed via %fnt in LoadFont. This can be confusing because
-    # %fnt is a section directive in groff fonts, and also the path to
-    # the download file without the asterisk at the beginning.
-    $self->{' embed'} = 1 if ($options & EMBGSUB) && $self->{opentype}{gsub};
-
-    if (($self->{' embed'} || $embedall) && !($options & NOFILE)) {
-	$self->embed_fontfile;
-    }
+    $self->embed_fontfile($j) if $j == 0 && !($options & NOFILE);
 }
 
 sub embed_fontfile {
-    my ($self) = @_;
+    my ($self, $j) = @_;
 
     my @fontno;
     my $f;
@@ -261,7 +251,7 @@ sub embed_fontfile {
     unless ($f) {
 	my %seen;
 	my @cid = grep !$seen{$_}++, map $_->[PSNAME],
-	    map @{$fontlst{$_}{FNT}{SUB}}, @fontno;
+	    map @$_, grep ref, map $fontlst{$_}{FNT}{SUBSET}->[$j], @fontno;
 	if (@cid == 0) {
 	    ;
 	} elsif (my $font_stream = $self->subset(\@cid)) {
@@ -363,7 +353,7 @@ sub font_descriptor {
 }
 
 sub cid_font_dictionary {
-    my ($self) = @_;
+    my ($self, $subset) = @_;
 
     # CIDFont dictionary (Table 117)
     my $cid_font = BuildObj(++$objct, {
@@ -376,13 +366,13 @@ sub cid_font_dictionary {
 
     if (my $p = GetObj($cid_font)) {
 	if ($self->{vertical}) {
-	    my $w2 = $self->w2_array;
+	    my $w2 = $self->w2_array($subset);
 	    if ($w2 && @$w2) {
 		$p->{DW2} = $self->{' DW2'};
 		$p->{W2} = $w2;
 	    }
 	} else {
-	    my $w = $self->w_array;
+	    my $w = $self->w_array($subset);
 	    if ($w && @$w) {
 		$p->{DW} = $self->{' DW'};
 		$p->{W} = $w;
@@ -395,23 +385,25 @@ sub cid_font_dictionary {
 
 
 sub tounicode_cmap {
-    my ($self) = @_;
+    my ($self, $subset) = @_;
 
-    my $cmaptype = 2;
-    my $cmapname = "/".$self->{' CMapName'};
-    my $cidsysteminfo = $self->{' CIDSystemInfo'};
-
-    my $sub = $self->SUB;
     my $cid2uni = $prefer_utf16
 	? sub { ($_[0]->[PSNAME] => $_[0]->[UNICODE]) }
 	: sub { ($_[0]->[PSNAME] => decode "UTF16-BE", pack "n*", map hex($_), split '_', $_[0]->[UNICODE]) };
-    my $code = { map { &$cid2uni($_) } grep defined $_->[UNICODE], @$sub };
-    return undef unless %$code;
 
-    my $ucmap = BuildObj(++$objct, {
+    my $cmapname = join '-',
+	$self->{' CIDSystemInfo'}{Registry} =~ /^\((.*?)\)$/,
+	$self->{' CIDSystemInfo'}{Ordering} =~ /^\((.*?)\)$/,
+	$self->{' CIDSystemInfo'}{Supplement};
+    my $cmap = $Predefined_CMap_names && $cmapname =~ /$Predefined_CMap_names/
+	? { map { &$cid2uni($_) } grep defined $_->[UNICODE] && $_->[OPTGSUB], @$subset }
+	: { map { &$cid2uni($_) } grep defined $_->[UNICODE], @$subset };
+    return undef unless %$cmap;
+
+    my $tounicode_cmap = BuildObj(++$objct, {
 	"Type" => "/CMap",
-	"CMapName" => $cmapname,
-	"CIDSystemInfo" => $cidsysteminfo,
+	"CMapName" => "/".$self->{' CMapName'},
+	"CIDSystemInfo" => $self->{' CIDSystemInfo'},
     });
     $obj[$objct]->{STREAM} = join "\n",
 	#grep !/^[%]/,
@@ -419,15 +411,15 @@ sub tounicode_cmap {
 /CIDInit /ProcSet findresource begin
 12 dict begin
 begincmap
-/CMapName $cmapname def
-/CMapType $cmaptype def
+/CMapName /$self->{' CMapName'} def
+/CMapType 2 def
 /CIDSystemInfo
-<< /Registry ($cidsysteminfo->{Registry})
-    /Ordering ($cidsysteminfo->{Ordering})
-    /Supplement $cidsysteminfo->{Supplement}
+<< /Registry (@{[ strip_paren( $self->{' CIDSystemInfo'}->{Registry} ) ]})
+/Ordering (@{[ strip_paren( $self->{' CIDSystemInfo'}->{Ordering} ) ]})
+/Supplement $self->{' CIDSystemInfo'}->{Supplement}
 >> def
-@{[ codespacerange([ map pack("U*", $_), keys %{$code} ]) ]}
-@{[ bfrange($code) ]}
+@{[ codespacerange([ map pack("U*", $_), keys %{$cmap} ]) ]}
+@{[ bfrange($cmap) ]}
 endcmap
 CMapName currentdict /CMap defineresource pop
 end
@@ -435,7 +427,12 @@ end
 endstream
     $obj[$objct]->{DATA}{Length} = length $obj[$objct]->{STREAM};
 
-    $ucmap;
+    $tounicode_cmap;
+}
+
+sub strip_paren {
+    $_[0] =~ /^[(](.*?)[)]$/;
+    $1 // $_[0];
 }
 
 
@@ -473,33 +470,6 @@ sub subset {
     return $subset->as_string if $subset;
     #Die("$0: can't subset $self->{internalname} ($self->{name})");
     return undef;
-}
-
-sub SUB {
-    my ($self) = @_;
-
-    return $self->{SUB} if defined $self->{SUB};
-
-    my $sub;
-    if (($options & CMAPFULL) == 0) {
-	if ($self->{' embed'} || $embedall) {
-	    $sub = $self->{SUB};
-	} else {
-	    my $name = join '-',
-		$self->{' CIDSystemInfo'}{Registry} =~ /^\((.*?)\)$/,
-		$self->{' CIDSystemInfo'}{Ordering} =~ /^\((.*?)\)$/,
-		$self->{' CIDSystemInfo'}{Supplement};
-	    if ($Predefined_CMap_names && $name =~ /$Predefined_CMap_names/) {
-		$sub = [ grep $_->[OPTGSUB], @{$self->{SUB}} ];
-	    } else {
-		$sub = $self->{SUB};
-	    }
-	}
-    } else {
-	$sub = $self->{SUB};
-    }
-
-    $self->{SUB} = $sub;
 }
 
 
@@ -617,22 +587,39 @@ sub AssignGlyph {
 
     return if $chf && defined $chf->[MINOR];
 
-    ($chf->[MINOR], $chf->[MAJOR]) = ($self->{ALLOC}++, 0);
-    push @{$self->{SUB}}, $chf;
+    # PDF display uses embedded fonts first, followed by tounicode cmap
+    # and system fonts. The former provides correct display but
+    # increases file size. The latter reduces file size by using fewer
+    # embedded fonts, but the display may be corrupted because the PDF
+    # viewer uses an alternative font of its choice.
 
-    push(@{$self->{CHARSET}->[$chf->[MAJOR]]}, $chf->[PSNAME]);
-    push(@{$self->{TRFCHAR}->[$chf->[MAJOR]]}, $ch);
+    # The following code chooses to embed glyphs rather than fonts per
+    # font. ($chf->[MAJOR] is 0 for embedding, 1 for not embedding.)
+
+    my $major = 1;		# default: not embedding
+    if (my $ucmap = $self->ucmap) {
+	if (defined $chf->[UNICODE]) {
+	    if (defined (my $u = $ucmap->{bf}{hex $chf->[UNICODE]})) {
+		$chf->[UNICODE] = $u;
+	    }
+	}
+    }
+    $major = 0 if $embedall;	     # embedding
+    $major = 0 if $self->{' embed'}; # also embedding
+    $major = 0 if !defined $chf->[UNICODE] || length $chf->[UNICODE] >= 8; # ditto
+    $chf->[MINOR] = $#{$self->{SUBSET}->[$chf->[MAJOR] = $major]} + 1;
+    push(@{$self->{SUBSET}->[$chf->[MAJOR]]}, $chf);
 
     $stream .= "% Assign: $chf->[PSNAME] to $chf->[MAJOR]/$chf->[MINOR]\n" if $debug;
 }
 
 sub w_array {
-    my ($self) = @_;
+    my ($self, $subset) = @_;
 
     my @w;
     my $n = 0;
     my $lastc = -1;
-    for my $chf (sort { $a->[PSNAME] <=> $b->[PSNAME] } @{$self->{SUB}}) {
+    for my $chf (sort { $a->[PSNAME] <=> $b->[PSNAME] } @$subset) {
 	my $c = $chf->[PSNAME];	# cid
 	my $w = $chf->[WIDTH] // $self->{' DW'};
 	if ($w == $self->{' DW'}) {
@@ -694,11 +681,11 @@ sub w_array {
 
 
 sub w2_array {
-    my ($self) = @_;
+    my ($self, $subset) = @_;
 
     my @w2;
     my $lastc = -1;
-    for my $chf (sort { $a->[PSNAME] <=> $b->[PSNAME] } @{$self->{SUB}}) {
+    for my $chf (sort { $a->[PSNAME] <=> $b->[PSNAME] } @$subset) {
 	my $c = $chf->[PSNAME];	# cid
 	my $w = $chf->[WIDTH] // $self->{' DW'};
 
@@ -899,9 +886,26 @@ sub blocking {
 }
 
 
+sub ucmap {
+    my ($self, $ucmap) = @_;
+    if ($ucmap) {
+	my %ucmap;
+	parse_cmap(\%ucmap, $ucmap);
+	$self->{ucmap} = \%ucmap;
+    }
+    $self->{ucmap};
+}
+
+
 sub parse_cmap {
-    my ($tounicode, $cmap) = @_;
+    my ($result, $cmap) = @_;
     $cmap =~ s/^\s*%.*//gm;
+    ($result->{CMapName}) = $cmap =~ /\/CMapName\s+(\S+)\s+def\b/;
+    ($result->{CMapType}) = $cmap =~ /\/CMapType\s+(\S+)\s+def\b/;
+    for (split /\n/, ($cmap =~ /\/CIDSystemInfo\s*<<(.*?)>>\s*def\b/s)[0]) {
+	next unless /\/(\S+)\s+(.*?)\s*$/;
+	$result->{CIDSystemInfo}{$1} = $2;
+    }
     my $hex = qr/[\da-f]+/i;
     while ($cmap =~ s/\d+\s+beginbf(range|char)\s*(.*?)\s*endbf\1\s*//s) {
 	my ($t, $bf) = ($1, $2);
@@ -911,16 +915,15 @@ sub parse_cmap {
 	    $end //= $start;
 	    my $value = '';
 	    $value = $1 || $2 if $bf =~ s/^(?:\[\s*([^\]]+)\]|(\<[^\>]+\>|\S+))\s*//s;
-	    #$value =~ s/<((?:$hex|\s)+)>/my $h = $1; $h =~ s{\s}{}g; "<$h>"/eg;
 	    $value =~ s/<((?:$hex|\s)+)>/my $h = $1; $h =~ s{\s}{}g; $h/eg;
 	    my @value = split /\s+/, $value;
 	    for ($start .. $end) {
 		last unless @value;
-		#$tounicode->[$_] = shift @value;
-		$tounicode->{$_} = shift @value;
+		$result->{bf}{$_} = shift @value;
 	    }
 	}
     }
+    $result;
 }
 
 
