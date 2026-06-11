@@ -32,7 +32,7 @@ use constant $constant = {
     UNICODE  => 5,
     RST      => 6,
     RSB      => 7,
-    OPTGSUB  => 8,
+    GSUB     => 8,
 
     CHR      => 0,
     XPOS     => 1,
@@ -61,8 +61,6 @@ use constant $constant = {
     COMPRESS => 4,
     NOFILE   => 8,
 
-    EMBGSUB  => 16,
-    CMAPFULL => 32,
     PYFTSUBSET => 64,
 
     PI => 3.141592653589793,

@@ -6,15 +6,13 @@ require 5.8.0;
 #use 5.008001;
 use Carp;
 use Encode;
-use List::Util qw(min);
+use List::Util qw(min max);
 use File::Temp  qw/tempfile/;
 use Unicode::Normalize;
 use Unicode::UCD qw/charblocks/;
 use Font::TTF::Font;
 
 use App::gropdf::Base qw(:all);
-
-my $prefer_utf16 = 1;    # reduces encoding/decoding by using utf16 as is
 
 # Table 119
 my $Predefined_CMap_names = qr/^Adobe-(GB1|CNS1|Japan1|Korea1|)-\d+$/;
@@ -387,16 +385,13 @@ sub cid_font_dictionary {
 sub tounicode_cmap {
     my ($self, $subset) = @_;
 
-    my $cid2uni = $prefer_utf16
-	? sub { ($_[0]->[PSNAME] => $_[0]->[UNICODE]) }
-	: sub { ($_[0]->[PSNAME] => decode "UTF16-BE", pack "n*", map hex($_), split '_', $_[0]->[UNICODE]) };
-
+    my $cid2uni = sub { ($_[0]->[PSNAME] => join ' ', split /[_\s]/, $_[0]->[UNICODE]) };
     my $cmapname = join '-',
 	$self->{' CIDSystemInfo'}{Registry} =~ /^\((.*?)\)$/,
 	$self->{' CIDSystemInfo'}{Ordering} =~ /^\((.*?)\)$/,
 	$self->{' CIDSystemInfo'}{Supplement};
     my $cmap = $Predefined_CMap_names && $cmapname =~ /$Predefined_CMap_names/
-	? { map { &$cid2uni($_) } grep defined $_->[UNICODE] && $_->[OPTGSUB], @$subset }
+	? { map { &$cid2uni($_) } grep defined $_->[UNICODE] && $_->[GSUB], @$subset }
 	: { map { &$cid2uni($_) } grep defined $_->[UNICODE], @$subset };
     return undef unless %$cmap;
 
@@ -418,7 +413,7 @@ begincmap
 /Ordering (@{[ strip_paren( $self->{' CIDSystemInfo'}->{Ordering} ) ]})
 /Supplement $self->{' CIDSystemInfo'}->{Supplement}
 >> def
-@{[ codespacerange([ map pack("U*", $_), keys %{$cmap} ]) ]}
+@{[ codespacerange([ keys %{$cmap} ]) ]}
 @{[ bfrange($cmap) ]}
 endcmap
 CMapName currentdict /CMap defineresource pop
@@ -553,16 +548,16 @@ sub GetNAM {
 	# converts decomposed char codes to composed char codes, and
 	# verify they are defined in the font.  uses composed character
 	# codes if verified.
-        elsif (my ($hex) = $c =~ /^u([\dA-F_]{4,})$/) {
-            my $u8 = pack "U*", map hex($_), split '_', $hex;
+        elsif (my ($h) = $c =~ /^u([\dA-F_]{4,})$/) {
+            my $u8 = pack "U*", map hex($_), split '_', $h;
             if ($u8 !~ /\p{InCJK_Compatibility_Ideographs}/) {
                 if (__PACKAGE__->can('NFC')) {
-		    my $hex_2 = join '_', map { sprintf "%04X", $_ } unpack "n*",
-			encode "UTF16-BE", NFC($u8);
-		    $hex = $hex_2 if $f->{NAM}->{'u'.$hex_2} == $r;
+		    my $h2 = join '_', map { sprintf "%04X", ord($_) } split //, NFC($u8);
+		    my $r2 = $f->{NAM}->{'u'.$h2};
+		    $h = $h2 if $r2 && $r2->[PSNAME] && $r2->[PSNAME] eq $r->[PSNAME];
                 }
             }
-            $r->[UNICODE] = $hex;
+            $r->[UNICODE] = $h;
         }
 
         $r->[WIDTH]   //= 1000;
@@ -593,13 +588,14 @@ sub AssignGlyph {
     # embedded fonts, but the display may be corrupted because the PDF
     # viewer uses an alternative font of its choice.
 
-    # The following code chooses to embed glyphs rather than fonts per
-    # font. ($chf->[MAJOR] is 0 for embedding, 1 for not embedding.)
+    # following code selects whether embedding or not embedding
+    # glyph-by-glyph, rather than font-by-font.
+    # ($chf->[MAJOR] is 0 for embedding, 1 for not embedding.)
 
     my $major = 1;		# default: not embedding
     if (my $ucmap = $self->ucmap) {
 	if (defined $chf->[UNICODE]) {
-	    if (defined (my $u = $ucmap->{bf}{hex $chf->[UNICODE]})) {
+	    if (defined (my $u = $ucmap->{bf}{$chf->[UNICODE]})) {
 		$chf->[UNICODE] = $u;
 	    }
 	}
@@ -607,6 +603,8 @@ sub AssignGlyph {
     $major = 0 if $embedall;	     # embedding
     $major = 0 if $self->{' embed'}; # also embedding
     $major = 0 if !defined $chf->[UNICODE] || length $chf->[UNICODE] >= 8; # ditto
+    $major = 0 if $chf->[GSUB];      # ditto
+
     $chf->[MINOR] = $#{$self->{SUBSET}->[$chf->[MAJOR] = $major]} + 1;
     push(@{$self->{SUBSET}->[$chf->[MAJOR]]}, $chf);
 
@@ -754,14 +752,8 @@ sub bfrange {
 	my $i = 0;
 	while ($i + 1 <= $#k) {
 	    last if $k[$i] + 1 != $k[$i + 1];
-	    my ($a, $b);
-	    if ($prefer_utf16) {
-		$a = [ map hex($_), split '_', $bfchar->{$k[$i]} ];
-		$b = [ map hex($_), split '_', $bfchar->{$k[$i + 1]} ];
-	    } else {
-		$a = [ map ord($_), split //, $bfchar->{$k[$i]} ];
-		$b = [ map ord($_), split //, $bfchar->{$k[$i + 1]} ];
-	    }
+	    my $a = [ map hex($_), split /[_\s]/, $bfchar->{$k[$i]} ];
+	    my $b = [ map hex($_), split /[_\s]/, $bfchar->{$k[$i + 1]} ];
 	    my $j = $#{$a};
 	    last if $#{$a} != $#{$b};
 	    last if $a->[$j] + 1 != $b->[$j];
@@ -780,97 +772,31 @@ sub bfrange {
 
     join "\n", (
 	blocking('bfrange', map {
-	    my @hex;
-	    if ($prefer_utf16) {
-		@hex = split '_', $bfchar->{$_->[0]};
-	    } else {
-		@hex = map sprintf('%04X', $_), unpack 'n*',
-		    encode 'UTF16-BE', $bfchar->{$_->[0]};
-	    }
+	    my @hex = encode_utf16be_hex($bfchar->{$_->[0]});
 	    join ' ',
 		sprintf("<%04X>", $_->[0]),
 		sprintf("<%04X>", $_->[1]), "<@hex>";
 	} @bfrange),
 	blocking('bfchar', map {
-	    my @hex;
-	    if ($prefer_utf16) {
-		@hex = split '_', $bfchar->{$_};
-	    } else {
-		@hex = map sprintf("%04X", $_), unpack "n*",
-		    encode "UTF16-BE", $bfchar->{$_};
-	    }
+	    my @hex = encode_utf16be_hex($bfchar->{$_});
 	    join ' ', sprintf("<%04X>", $_), "<@hex>";
 	} @bfchar),
     );
 }
 
 
+sub encode_utf16be_hex {
+    my @hex = map {
+	map { sprintf "%04X", $_ } unpack 'n*', encode 'UTF16-BE', pack "U*", hex($_)
+    } split /[_\s]/, $_[0];
+    @hex;
+}
+
 sub codespacerange {
     my ($code) = @_;
-    my @list;
-    my %seen;
-    for (sort grep !$seen{$_}++, @$code) {
-	if (@list) {
-	    if (length $list[-1]->[0] == length) {
-		my @s = $list[-1]->[0] =~ /^(.*?)(.|\n)$/;
-		my @x = /^(.*?)(.|\n)$/;
-		if ($x[0] eq $s[0]) {
-		    $list[-1]->[1] = $_;
-		    next;
-		}
-	    }
-	}
-	if (@list) {
-	    my @s = unpack 'n*', encode 'UTF16-BE', $list[-1]->[0];
-	    my @e = unpack 'n*', encode 'UTF16-BE', $list[-1]->[1];
-	    my @n = unpack 'n*', encode 'UTF16-BE', $_;
-	    if ($e[0] == $n[0]) {
-		Notice(join ' ', 'codespacerange:',
-		    "<@{[ map sprintf('%04X', $_), @e ]}>",
-		    'and',
-		    "<@{[ map sprintf('%04X', $_), @n ]}>",
-		    'overlapped');
-	    }
-	}
-	push @list, [ $_, $_ ];
-    }
-    blocking('codespacerange', map {
-	my @s = map sprintf("%04X", $_), unpack 'n*', encode 'UTF16-BE', $_->[0];
-	my @e = map sprintf("%04X", $_), unpack 'n*', encode 'UTF16-BE', $_->[1];
-	"<@s> <@e>";
-    } @list);
+    my @list = [ map sprintf("%04X", $_), min(@$code), max(@$code) ];
+    blocking('codespacerange', map { "<$_->[0]> <$_->[1]>" } @list);
 }
-
-
-sub cidrange {
-    my ($tounicode) = @_;
-    my @list;
-    for (sort { $tounicode->{$a} cmp $tounicode->{$b} } keys %{$tounicode}) {
-	if (@list) {
-	    if (length $list[-1]->[0] == length $tounicode->{$_}) {
-		my @s = $list[-1]->[0] =~ /^(.*?)(.|\n)$/;
-		my @x = $tounicode->{$_} =~ /^(.*?)(.|\n)$/;
-		if ($x[0] eq $s[0] && $list[-1]->[2] + (ord($x[1]) - ord($s[1])) == $_) {
-		    $list[-1]->[1] = $tounicode->{$_};
-		    next;
-		}
-	    }
-	}
-	push @list, [ $tounicode->{$_}, $tounicode->{$_}, $_ ];
-    }
-    join "\n", (
-	blocking('cidrange', map {
-	    my @s = map sprintf("%04X", $_), unpack 'n*', encode 'UTF16-BE', $_->[0];
-	    my @e = map sprintf("%04X", $_), unpack 'n*', encode 'UTF16-BE', $_->[1];
-	    join ' ', "<@s>", "<@e>", $_->[2];
-	} grep $_->[0] ne $_->[1], @list),
-	blocking('cidchar', map {
-	    my @s = map sprintf("%04X", $_), unpack 'n*', encode 'UTF16-BE', $_->[0];
-	    "<@s> $_->[2]";
-	} grep $_->[0] eq $_->[1], @list),
-    );
-}
-
 
 sub blocking {
     my ($name, @in) = @_;
@@ -919,7 +845,10 @@ sub parse_cmap {
 	    my @value = split /\s+/, $value;
 	    for ($start .. $end) {
 		last unless @value;
-		$result->{bf}{$_} = shift @value;
+		my $k = sprintf "%04X", $_;
+		#my $v = shift @value;
+		my @v = map sprintf('%04X', $_), unpack 'n*', pack 'H*', shift @value;
+		$result->{bf}{$k} = "@v";
 	    }
 	}
     }

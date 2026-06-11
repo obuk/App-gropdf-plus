@@ -1,6 +1,6 @@
 package App::gropdf::plus;
 
-our $VERSION = "2026.06.10";
+our $VERSION = "2026.06.12";
 
 #!@PERL@
 #
@@ -3130,7 +3130,7 @@ sub LoadFont {
 		} else {
 		    for (splice(@r, 6)) {
 			my ($k, $v) = split '=';
-			$opt{$k} = $v;
+			$opt{$k} = $v // 1;
 		    }
 		}
 		$r[5] = undef;
@@ -3169,7 +3169,7 @@ sub LoadFont {
 		$r[5],		# UNICODE
 		$p[1]||0,	# RST
 		$p[2]||0,	# RSB
-		$opt{gsub},	# OPTGSUB
+		$opt{gsub},	# GSUB
 	    ];
 
 	    if (defined $fnt{NO}->[$r[3]] && $fnt{NO}->[$r[3]] ne $r[0]) {
