@@ -385,14 +385,9 @@ sub cid_font_dictionary {
 sub tounicode_cmap {
     my ($self, $subset) = @_;
 
+    return undef unless ref $subset && @$subset;
     my $cid2uni = sub { ($_[0]->[PSNAME] => join ' ', split /[_\s]/, $_[0]->[UNICODE]) };
-    my $cmapname = join '-',
-	$self->{' CIDSystemInfo'}{Registry} =~ /^\((.*?)\)$/,
-	$self->{' CIDSystemInfo'}{Ordering} =~ /^\((.*?)\)$/,
-	$self->{' CIDSystemInfo'}{Supplement};
-    my $cmap = $Predefined_CMap_names && $cmapname =~ /$Predefined_CMap_names/
-	? { map { &$cid2uni($_) } grep defined $_->[UNICODE] && $_->[GSUB], @$subset }
-	: { map { &$cid2uni($_) } grep defined $_->[UNICODE], @$subset };
+    my $cmap = { map { &$cid2uni($_) } grep defined $_->[UNICODE], @$subset };
     return undef unless %$cmap;
 
     my $tounicode_cmap = BuildObj(++$objct, {
