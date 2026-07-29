@@ -11,6 +11,8 @@ use File::Temp  qw/tempfile/;
 use Unicode::Normalize;
 use Unicode::UCD qw/charblocks/;
 use Font::TTF::Font;
+use Font::TTF::Cmap::Uvs;	# https://github.com/obuk/Font-TTF-Cmap-Uvs.git
+use Font::TTF::CFF_;		# https://github.com/obuk/Font-TTF-CFF_.git
 
 use App::gropdf::Base qw(:all);
 
